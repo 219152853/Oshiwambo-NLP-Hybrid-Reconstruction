@@ -27,7 +27,6 @@ The system utilizes a dual-pathway logic:
 - `/src`: Core logic for morphological peeling and agglutinative synthesis.
 - `app.py`: The Streamlit interface for live testing and prediction.
 
----
 **Author:** Raban S. Raban  
 **Supervision:** Prof. Hippolyte N’sung-Nza Muyingi  
 *Department of Informatics, Journalism and Media Studies, NUST.*
