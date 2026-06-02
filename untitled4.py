@@ -4,19 +4,43 @@ import glob
 import os
 import re
 
-"""
-The methodological performance focuses on how raw text is transformed into a
-standardized format that a machine learning model can actually understand. Before
-entering the diagnostic tool, the system performs Tokenization, breaking raw text into
-individual words. Expanding this to seven dialects resulted in a 41.5% increase in
-vocabulary, yielding 260,751 unique tokens. To process this, the system applies
-One-Hot Encoding to convert these words into numerical expressions (binary vectors).
-
-Data manipulation is handled by Pandas (cleaning 5,955 text samples) and NumPy
-(mathematical data transformation). Because training is resource-heavy, Google Colab
-provides cloud-based GPU power to bypass local hardware limitations, and GitHub
-ensures precise version control.
-"""
+# =====================================================================
+# HYBRID FEATURE PIPELINE & MORPHOLOGICAL STEMMING SCRIPT
+# Aligns with Sections 6.4, 6.5, and 6.7
+# Prepares the data, establishes empirical frequencies to handle data sparsity, 
+# and builds structural feature mappings.
+#
+# LINGUISTIC SPECIFICATION LAYER MAPS:
+# 1. Noun Class Architecture (The Semantic Core):
+#    Analyzes Noun Classes through standard Bantu linguistic conventions.
+#    Extracts prefix + stem.
+#    [omu-] (Class 1: Human, Sing.)  + [-ntu] (Stem) = omuntu (Person)
+#    [ova-] (Class 2: Human, Plur.)  + [-ntu] (Stem) = ovantu (People)
+# 2. Concord (Agreement) System & Subject Markers:
+#    Rules dictate that prefixes must drive grammatical modifiers:
+#    Class 1 (Human, Sing.)   -> SM u-   | Adj Prefix mu-  | omu-ntu u-nene
+#    Class 7 (Tool/Lang., S.) -> SM shi- | Adj Prefix shi- | oshi-longelo shi-kulu
+# 3. Agglutinative Verb Morphology and Canonical Template:
+#    Verb templates are segmented via canonical template:
+#    [SM] – [TAM] – [OM] – ROOT – [EXT] – FV
+#    Example: va-ta-mu-long-el-a ("They will work for him.")
+# 4. Derivational Morphology vs. Inflection:
+#    Canonical templates synthesize new lexical noun forms from verbs:
+#    Verb -> Noun: oku- + ROOT (okulya)
+#    Agent Noun:  omu- + ROOT + -i (omulongi)
+#    Instrument:  oshi- + ROOT + -o (oshilongelo)
+#    Abstract:    ou- + ROOT (oulonga)
+# 5. Morphophonological Rules (Critical for Dialect Roots):
+#    Identifies transformations occurring when sounds collide:
+#    Nasal assimilation: N + b -> mb (on + budi -> ombudi)
+#    Consonant weakening: k ↔ h (oka / oha)
+# 6. Compounding structures:
+#    Identifies compound structures across native syntactic formations:
+#    - N + N: omuti-woondjila (roadside tree)
+#    - N + Modifier: oshi-longelo shikulu (old tool)
+#    - Verb-Based: oku-longa-omakende (glass-making)
+#    - Descriptive: oshi-longa shokulya (eating action)
+# =====================================================================
 
 # 1. Clean up old files to ensure a fresh build
 if os.path.exists('dialects_model.json'):
@@ -32,50 +56,45 @@ file_path = csv_files[0]
 df = pd.read_csv(file_path)
 df.columns = df.columns.str.strip()
 
-target_dialects =['Aa-ndonga', 'Aa-kwambi', 'Aa-mbalanhu', 'Aa-kwaluudhi', 'Aa-kwanyama', 'Aa-ngandjera', 'Aa-mbandja']
+target_dialects = ['Aa-ndonga', 'Aa-kwambi', 'Aa-mbalanhu', 'Aa-kwaluudhi', 'Aa-kwanyama', 'Aa-ngandjera', 'Aa-mbandja']
 
 def extract_oshiwambo_root(word):
     """
-    Because Oshiwambo is an agglutinative (glued-together) language, a single word often
-    contains a prefix at the beginning, a core meaning in the middle, and a suffix at the end.
-    When a word is inputted into the system, it immediately passes through the
-    extract_oshiwambo_root (word) function. This module strips the input of its grammatical
-    wrapping to isolate the raw "concept form" (the morphological root). This specific
-    stemming process successfully reduced the 260,751 tokens down to 198,432 uniform
-    root forms (a 23.9% reduction).
-
-    To prevent partial matching errors where a shorter prefix is erroneously stripped from a
-    word containing a longer prefix (for example if a word starts with omalu-, the computer
-    will remove the whole omalu- rather than just mistakenly removing the o-) the system
-    sorts both the prefix and suffix arrays in descending order from the longest word-parts
-    to the shortest. During execution, the function normalizes the word to lowercase and
-    strips surrounding whitespace. It performs a targeted infix replacement specific to
-    documented loanword phonology and complex morphemes (for example handling the
-    internal sequence 'nange' by mapping it to 'nge').
+    Objective 1: Morphological Dissection (Section 6.7.1)
+    Stem Oshiwambo words using morphological rules from multiple linguistic sources,
+    including Uushona (2019) on German loanwords.
+    
+    Utilizes a high-fidelity 'Peeling' mechanism by establishing a 
+    descending-order list to prevent partial matching errors.
     """
+    # Prefixes sorted by length to prevent partial matching errors
     prefixes = sorted([
         'omalu', 'omaku', 'otshi', 'otava', 'otaka', 'otashi', 'ohandi', 'okwa', 'omu', 'ova', 
         'omi', 'oma', 'olu', 'oka', 'oku', 'aba', 'oya', 'ota', 'oo', 'ee', 'oi', 'ou', 
         'uu', 'aa', 'me', 'ko', 'po', 'mu', 'shi', 'e', 'o', 'a', 'i'
     ], key=len, reverse=True)
     
+    # Suffixes sorted by length
     suffixes = sorted([
-        'ululwa', 'shakati', 'enena', 'inina', 'elela', 'ilila', 'ulula', 'olola', 'onona', 'ununa', 'afana', 
-        'mweno', 'kulu', 'gona', 
+        'ululwa', 'shakati', 'enena', 'inina', 'elela', 'ilila', 'ulula', 'olola', 'onona', 'ununa', 'afana', # Verbal Extensions
+        'mweno', 'kulu', 'gona', # Kinship/Diminutive Suffixes
         'thana', 'thani', 'elwa', 'elwi', 'thwa', 'thwi', 'elel',
-        'ena', 'eni', 'uka', 'oka', 'wa', 'po', 'ko', 'mo', 'nge', 'ith', 'ik', 'ek', 'el', 'il' 
+        'ena', 'eni', 'uka', 'oka', 'wa', 'po', 'ko', 'mo', 'nge', 'ith', 'ik', 'ek', 'el', 'il' # Suffixes
     ], key=len, reverse=True)
     
     stem = str(word).lower().strip()
     
+    # Infix handling, e.g., omunangeshefa -> omungeshefa
     if 'nange' in stem:
         stem = stem.replace('nange', 'nge')
     
+    # Strip Prefix
     for pref in prefixes:
         if stem.startswith(pref) and len(stem) > len(pref) + 2:
             stem = stem[len(pref):]
             break
             
+    # Strip Suffix
     for suff in suffixes:
         if stem.endswith(suff) and len(stem) > len(suff) + 1:
             stem = stem[:-len(suff)]
@@ -85,16 +104,9 @@ def extract_oshiwambo_root(word):
 
 def get_cnn_morphological_fingerprints(word):
     """
-    This function simulates the behavior of the Convolutional Neural Network (CNN) feature
-    extraction layer. By treating words as sequential data, the system applies sliding
-    algorithmic windows (kernels) of sizes across both the original word and its extracted
-    root. N=3, N=4, and N=5.
-    
-    Instead of looking at the whole word at once, the computer breaks the word down into
-    tiny clusters of 3, 4, and 5 letters. For example, if the word is okutondoka, the model
-    creates sets of characters like 'oku', 'kut', 'tond', 'ndok', and 'doka'. These n-grams are
-    aggregated into a unique mathematical set known as the Morphological Signature or
-    Fingerprint.
+    Objective 2: Spatial Pattern Recognition (CNN) (Section 6.7.2)
+    Generate sub-word feature extractions representing the CNN Layer's n-gram analysis.
+    Applies sliding windows (kernels N=3,4,5) to encode dialect-specific syntactic rules.
     """
     sigs = set()
     root_form = extract_oshiwambo_root(word)
@@ -108,13 +120,8 @@ def get_cnn_morphological_fingerprints(word):
     return list(sigs)
 
 # 3. Methodological Performance: Frequency Mapping for Min-Max Scaling
-# Because historically recorded data favors dominant dialects like Aa-ndonga, the
-# computer would naturally become biased and ignore rare dialects like Aa-mbandja. If
-# the computer only looked at how often a word appeared, the common words would
-# completely overpower the rare dialect words. To fix this, the system compresses all
-# word frequencies onto a fair scale between 0 and 1. This ensures that a rare word in the
-# Aa-mbandja dialect is treated with the same mathematical importance as a highly
-# common word in the Aa-ndonga dialect.
+# Section 6.4: Addresses Dialectal Dominance to ensure high-frequency dialects 
+# do not overwhelm the machine learning process of marginalized ones.
 freq_map = {}
 for _, row in df.iterrows():
     for dialect in target_dialects:
@@ -130,11 +137,8 @@ if x_min == x_max:
     x_max = x_min + 1  
 
 # 4. Build the structured feature index
-dataset =[]
+dataset = []
 
-# To ensure the code remains computationally manageable, the pipeline applies
-# Dimensionality Reduction, compressing the data to feature vectors of exactly 5,000
-# dimensions (a 97.5% reduction), keeping only the most dialectally significant terms.
 for _, row in df.iterrows():
     standard_origin = str(row.get('Oshiwambo', 'Unknown')).strip()
     
